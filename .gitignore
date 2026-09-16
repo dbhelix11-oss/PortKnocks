@@ -1,0 +1,23 @@
+# Key material -- never commit actual secrets, only *.example configs
+*.key
+secret.key
+*.conf
+!*.conf.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# C++ build artifacts
+server/src/*.o
+server/knockd
+server/test_derive
+server/test_session
+
+# Local scratch
+/tmp/
+
+# Not project content
+.claude/
+QUICKREF.md

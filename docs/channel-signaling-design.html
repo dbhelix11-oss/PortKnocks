@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Channel Signaling Design</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f4f6f8;
+    --text: #1c2530;
+    --text-dim: #5b6b7a;
+    --border: #d8dee4;
+    --accent: #2563eb;
+    --accent-bg: #eaf1ff;
+    --bad: #c0392b;
+    --bad-bg: #fdecea;
+    --good: #1a7f4e;
+    --good-bg: #e9f8f0;
+    --code-bg: #eef1f4;
+    --box-time: #cfe3ff;
+    --box-time-border: #6f9ceb;
+    --box-channel: #ffe1b8;
+    --box-channel-border: #e2984a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181d;
+      --bg-alt: #1b2129;
+      --text: #e6ebf0;
+      --text-dim: #93a1ae;
+      --border: #2c3540;
+      --accent: #6ea3ff;
+      --accent-bg: #1b2a44;
+      --bad: #ff8a80;
+      --bad-bg: #3a1f1d;
+      --good: #6fe3ab;
+      --good-bg: #143327;
+      --code-bg: #1e252d;
+      --box-time: #234066;
+      --box-time-border: #4f7fc9;
+      --box-channel: #5a4020;
+      --box-channel-border: #c98a3f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 840px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+  }
+  h1 {
+    font-size: 1.9rem;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--text-dim);
+    margin-top: 0;
+    margin-bottom: 40px;
+    font-size: 1.05rem;
+  }
+  h2 {
+    font-size: 1.35rem;
+    margin-top: 56px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin-top: 28px;
+    color: var(--accent);
+  }
+  p { margin: 14px 0; }
+  code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 14px 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .callout {
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin: 20px 0;
+    border: 1px solid var(--border);
+  }
+  .callout.bad { background: var(--bad-bg); border-color: var(--bad); }
+  .callout.good { background: var(--good-bg); border-color: var(--good); }
+  .callout.info { background: var(--accent-bg); border-color: var(--accent); }
+  .callout .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .callout.bad .label { color: var(--bad); }
+  .callout.good .label { color: var(--good); }
+  .callout.info .label { color: var(--accent); }
+  figure {
+    margin: 24px 0;
+    padding: 16px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow-x: auto;
+  }
+  figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    margin-top: 10px;
+  }
+  dl.glossary dt {
+    font-weight: 600;
+    margin-top: 16px;
+    color: var(--accent);
+  }
+  dl.glossary dd { margin: 4px 0 0 0; color: var(--text); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 0.92rem;
+  }
+  th { background: var(--bg-alt); }
+  .toc {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 24px;
+  }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ol { margin: 8px 0 0 0; padding-left: 20px; }
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--text); }
+  svg .dim { fill: var(--text-dim); }
+  svg .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Channel Signaling: What We Wanted, Why It Broke, and the Fix</h1>
+  <p class="subtitle">
+    A worked example of how a knock-based, TOTP-style (Time-based
+    One-Time Password) authorization scheme was extended to trigger
+    multiple different actions — and a cryptographic mistake that got
+    caught before it shipped.
+  </p>
+
+  <div class="toc">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#recap">Recap: how the base system derives a knock sequence</a></li>
+      <li><a href="#goal">The goal: multiple signal "channels"</a></li>
+      <li><a href="#idea">The original idea: shift the time counter</a></li>
+      <li><a href="#why-broken">Why that's broken: aliasing</a></li>
+      <li><a href="#fix">The fix: a second, independent input</a></li>
+      <li><a href="#summary">Summary</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+    </ol>
+  </div>
+
+  <h2 id="recap">1. Recap: how the base system derives a knock sequence</h2>
+
+  <p>
+    The existing client and server agree on a shared secret key (32
+    random bytes, generated once, copied to both sides). Time is divided
+    into fixed-length windows — <code>T = 30</code> seconds each — and a
+    <strong>time counter</strong> just counts how many windows have
+    elapsed since the Unix epoch:
+  </p>
+
+  <pre><code>time_counter = floor(unix_time / T)</code></pre>
+
+  <p>
+    That counter is fed into <strong>HMAC-SHA256</strong> together with
+    the secret key, producing a 32-byte digest. The digest is sliced into
+    2-byte chunks, and each chunk becomes one port number (via modulo the
+    configured port range):
+  </p>
+
+  <pre><code>digest   = HMAC-SHA256(secret, time_counter)
+port[i]  = PORT_LOW + (uint16(digest[2i : 2i+2]) mod (PORT_HIGH - PORT_LOW + 1))</code></pre>
+
+  <figure>
+    <svg viewBox="0 0 640 130" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10" y="45" width="150" height="46" rx="8" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+      <text x="85" y="73" text-anchor="middle" class="mono">secret (32 B)</text>
+      <text x="85" y="30" text-anchor="middle" class="dim" font-size="12">shared, never sent</text>
+
+      <rect x="180" y="45" width="150" height="46" rx="8" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+      <text x="255" y="73" text-anchor="middle" class="mono">time_counter</text>
+      <text x="255" y="30" text-anchor="middle" class="dim" font-size="12">changes every 30s</text>
+
+      <path d="M330 68 H 380" stroke="var(--text-dim)" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <rect x="385" y="45" width="130" height="46" rx="8" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="450" y="73" text-anchor="middle" class="mono">HMAC-SHA256</text>
+
+      <path d="M515 68 H 555" stroke="var(--text-dim)" stroke-width="2" marker-end="url(#arrow)"/>
+
+      <rect x="560" y="45" width="70" height="46" rx="8" fill="var(--box-channel)" stroke="var(--box-channel-border)"/>
+      <text x="595" y="73" text-anchor="middle" class="mono" font-size="12">ports</text>
+
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="var(--text-dim)"/>
+        </marker>
+      </defs>
+    </svg>
+    <figcaption>Today's derivation: one input besides the key (time_counter) → one output (a port sequence).</figcaption>
+  </figure>
+
+  <h2 id="goal">2. The goal: multiple signal "channels"</h2>
+
+  <p>
+    The idea on the table: instead of the knock sequence only ever
+    meaning "open the port," support several distinct, equally
+    unforgeable sequences — 11 in total. Channel 0 keeps meaning "open
+    the port" (unchanged). Channels 1 through 10 each trigger a different
+    pre-configured action behind the firewall, entirely without needing a
+    connection back to the client (fire-and-forget, matching how a knock
+    already works).
+  </p>
+
+  <h2 id="idea">3. The original idea: shift the time counter</h2>
+
+  <p>
+    The proposed mechanism was to reuse the existing formula, but feed it
+    a deliberately offset time counter per channel — e.g. channel
+    <code>+2</code> would compute <code>HMAC(secret, time_counter + 2)</code>
+    instead of <code>HMAC(secret, time_counter)</code>. Ten channels,
+    ten fixed offsets (five in each direction), no change to the hash
+    input's shape — just a predictable "stairstep" applied to the one
+    number already going in.
+  </p>
+
+  <h2 id="why-broken">4. Why that's broken: aliasing</h2>
+
+  <div class="callout bad">
+    <span class="label">The problem</span>
+    Today's derivation is a function of exactly one thing:
+    <code>f(W) = HMAC(secret, W)</code>, where <code>W</code> is the time
+    counter. Shifting the input doesn't create a second function — it
+    just evaluates <em>the same</em> <code>f</code> at a different point.
+    So "channel +2, evaluated right now at window <code>W</code>" is
+    <code>f(W+2)</code> — and that is <em>exactly</em> the value that
+    channel 0 will legitimately produce two windows from now. Same 32
+    bytes, same derived ports.
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg">
+      <text x="10" y="24" font-size="13" font-weight="600">channel 0's sequence, one column per time window</text>
+      <g id="row0">
+        <rect x="10"  y="34" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="110" y="34" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="210" y="34" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="310" y="34" width="90" height="40" rx="6" fill="var(--box-channel)" stroke="var(--box-channel-border)" stroke-width="2"/>
+        <rect x="410" y="34" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="510" y="34" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="55"  y="58" text-anchor="middle" class="mono" font-size="12">f(W-2)</text>
+        <text x="155" y="58" text-anchor="middle" class="mono" font-size="12">f(W-1)</text>
+        <text x="255" y="58" text-anchor="middle" class="mono" font-size="12">f(W)</text>
+        <text x="355" y="58" text-anchor="middle" class="mono" font-size="12" font-weight="700">f(W+2)</text>
+        <text x="455" y="58" text-anchor="middle" class="mono" font-size="12">f(W+3)</text>
+        <text x="555" y="58" text-anchor="middle" class="mono" font-size="12">f(W+4)</text>
+      </g>
+      <text x="255" y="88" text-anchor="middle" class="dim" font-size="12">↑ "now"</text>
+
+      <text x="10" y="130" font-size="13" font-weight="600">"channel +2" sequence, evaluated at each of the same real moments</text>
+      <g id="row1">
+        <rect x="10"  y="140" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="110" y="140" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="210" y="140" width="90" height="40" rx="6" fill="var(--box-channel)" stroke="var(--box-channel-border)" stroke-width="2"/>
+        <rect x="310" y="140" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="410" y="140" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <rect x="510" y="140" width="90" height="40" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="55"  y="164" text-anchor="middle" class="mono" font-size="12">f(W)</text>
+        <text x="155" y="164" text-anchor="middle" class="mono" font-size="12">f(W+1)</text>
+        <text x="255" y="164" text-anchor="middle" class="mono" font-size="12" font-weight="700">f(W+2)</text>
+        <text x="355" y="164" text-anchor="middle" class="mono" font-size="12">f(W+3)</text>
+        <text x="455" y="164" text-anchor="middle" class="mono" font-size="12">f(W+4)</text>
+        <text x="555" y="164" text-anchor="middle" class="mono" font-size="12">f(W+5)</text>
+      </g>
+      <path d="M355,74 C 355,100 255,110 255,136" fill="none" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5,4"/>
+      <text x="480" y="195" text-anchor="middle" fill="var(--bad)" font-size="13" font-weight="600">identical bytes — captured "here" is valid "there"</text>
+    </svg>
+    <figcaption>
+      "Channel +2, right now" (bottom row, under the "now" column) computes
+      <code>f(W+2)</code> — the exact same digest that channel 0 will
+      legitimately produce two windows later (top row). A sequence captured
+      from one is a valid replay of the other.
+    </figcaption>
+  </figure>
+
+  <p>
+    This isn't a matter of picking a "safer" offset. <code>f</code> is one
+    function; shifting where you sample it never leaves the line it's
+    already defined on. Every offset aliases with some other real moment
+    in channel 0's own timeline — some are seconds away (colliding with
+    the server's existing ±1-window clock-skew tolerance), some are
+    further out, but none are safe, because the aliasing is structural,
+    not a matter of degree.
+  </p>
+
+  <h2 id="fix">5. The fix: a second, independent input</h2>
+
+  <div class="callout good">
+    <span class="label">The fix</span>
+    Give the hash two genuinely separate inputs instead of one shiftable
+    one — a dedicated <code>channel_id</code> byte, concatenated onto the
+    message rather than added to the time value:
+  </div>
+
+  <pre><code>digest = HMAC-SHA256(secret, time_counter || channel_id)</code></pre>
+
+  <p>
+    <code>||</code> means byte concatenation — glue the two pieces
+    together into one longer message before hashing. Now think of the
+    derivation as a 2D grid instead of a 1D line: rows are time windows,
+    columns are channels.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 640 240" xmlns="http://www.w3.org/2000/svg">
+      <text x="20" y="24" font-size="12" class="dim">channel_id →</text>
+      <text x="130" y="24" text-anchor="middle" class="mono" font-size="12">0</text>
+      <text x="240" y="24" text-anchor="middle" class="mono" font-size="12">1</text>
+      <text x="350" y="24" text-anchor="middle" class="mono" font-size="12">2</text>
+      <text x="460" y="24" text-anchor="middle" class="mono" font-size="12">3</text>
+      <text x="570" y="24" text-anchor="middle" class="mono" font-size="12">…10</text>
+
+      <text x="0" y="66" font-size="12" class="dim">W</text>
+      <text x="0" y="116" font-size="12" class="dim">W+1</text>
+      <text x="0" y="166" font-size="12" class="dim">W+2</text>
+
+      <!-- row W -->
+      <g font-size="12">
+        <rect x="85"  y="42" width="90" height="38" rx="6" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <text x="130" y="65" text-anchor="middle" class="mono">7a1e…</text>
+        <rect x="195" y="42" width="90" height="38" rx="6" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <text x="240" y="65" text-anchor="middle" class="mono">f03c…</text>
+        <rect x="305" y="42" width="90" height="38" rx="6" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <text x="350" y="65" text-anchor="middle" class="mono">91bd…</text>
+        <rect x="415" y="42" width="90" height="38" rx="6" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <text x="460" y="65" text-anchor="middle" class="mono">2ee7…</text>
+        <rect x="525" y="42" width="90" height="38" rx="6" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <text x="570" y="65" text-anchor="middle" class="mono">c410…</text>
+      </g>
+
+      <!-- row W+1 -->
+      <g font-size="12">
+        <rect x="85"  y="92" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="130" y="115" text-anchor="middle" class="mono">3c9a…</text>
+        <rect x="195" y="92" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="240" y="115" text-anchor="middle" class="mono">88f1…</text>
+        <rect x="305" y="92" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="350" y="115" text-anchor="middle" class="mono">d02b…</text>
+        <rect x="415" y="92" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="460" y="115" text-anchor="middle" class="mono">5a6e…</text>
+        <rect x="525" y="92" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="570" y="115" text-anchor="middle" class="mono">1f77…</text>
+      </g>
+
+      <!-- row W+2 -->
+      <g font-size="12">
+        <rect x="85"  y="142" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="130" y="165" text-anchor="middle" class="mono">e6b4…</text>
+        <rect x="195" y="142" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="240" y="165" text-anchor="middle" class="mono">0a9d…</text>
+        <rect x="305" y="142" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="350" y="165" text-anchor="middle" class="mono">44c1…</text>
+        <rect x="415" y="142" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="460" y="165" text-anchor="middle" class="mono">b930…</text>
+        <rect x="525" y="142" width="90" height="38" rx="6" fill="var(--bg)" stroke="var(--border)"/>
+        <text x="570" y="165" text-anchor="middle" class="mono">7d2f…</text>
+      </g>
+
+      <text x="320" y="210" text-anchor="middle" fill="var(--good)" font-size="13" font-weight="600">
+        every cell independent — no arithmetic relationship between columns or rows
+      </text>
+    </svg>
+    <figcaption>
+      Illustrative digests only (not real HMAC output). The point: unlike
+      the one-axis version, there is no shift that turns one column into
+      another — each channel is its own unrelated pseudorandom function
+      of time.
+    </figcaption>
+  </figure>
+
+  <h3>Byte layout</h3>
+
+  <figure>
+    <svg viewBox="0 0 620 150" xmlns="http://www.w3.org/2000/svg">
+      <text x="310" y="20" text-anchor="middle" font-size="13" font-weight="600">HMAC message, 9 bytes total</text>
+
+      <g>
+        <rect x="10"  y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="70"  y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="130" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="190" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="250" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="310" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="370" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="430" y="40" width="60" height="46" fill="var(--box-time)" stroke="var(--box-time-border)"/>
+        <rect x="490" y="40" width="60" height="46" fill="var(--box-channel)" stroke="var(--box-channel-border)"/>
+
+        <g font-size="11" class="mono">
+          <text x="40"  y="68" text-anchor="middle">0</text>
+          <text x="100" y="68" text-anchor="middle">1</text>
+          <text x="160" y="68" text-anchor="middle">2</text>
+          <text x="220" y="68" text-anchor="middle">3</text>
+          <text x="280" y="68" text-anchor="middle">4</text>
+          <text x="340" y="68" text-anchor="middle">5</text>
+          <text x="400" y="68" text-anchor="middle">6</text>
+          <text x="460" y="68" text-anchor="middle">7</text>
+          <text x="520" y="68" text-anchor="middle">8</text>
+        </g>
+      </g>
+
+      <path d="M10,100 H 490" stroke="var(--box-time-border)" stroke-width="2"/>
+      <text x="250" y="118" text-anchor="middle" font-size="12">time_counter — 8 bytes, big-endian (0 .. 2⁶⁴−1)</text>
+
+      <path d="M490,100 H 550" stroke="var(--box-channel-border)" stroke-width="2"/>
+      <text x="520" y="118" text-anchor="middle" font-size="12">channel_id</text>
+      <text x="520" y="134" text-anchor="middle" font-size="11" class="dim">1 byte (0–10 used)</text>
+    </svg>
+    <figcaption>
+      "Big-endian" just means the most-significant byte comes first —
+      normal left-to-right reading order for the number. The single
+      appended byte is the entire change to the wire format.
+    </figcaption>
+  </figure>
+
+  <div class="callout info">
+    <span class="label">Why this actually fixes it</span>
+    HMAC treats its whole input as one opaque blob. <code>time_counter ||
+    0</code> and <code>time_counter || 3</code> are two completely
+    different messages as far as the hash is concerned — there's no
+    "shift by 3" relationship connecting their outputs the way there was
+    between <code>f(W)</code> and <code>f(W+3)</code> in the old,
+    single-input version. That's the formal meaning of calling HMAC a
+    <strong>PRF</strong> (see glossary): a family of functions indexed by
+    whatever you feed in besides the key, where different indices give
+    statistically unrelated outputs.
+  </div>
+
+  <h2 id="summary">6. Summary</h2>
+
+  <table>
+    <tr><th></th><th>Time-shift idea</th><th>channel_id byte (adopted)</th></tr>
+    <tr><td>Formula</td><td><code>HMAC(secret, W + offset)</code></td><td><code>HMAC(secret, W || channel_id)</code></td></tr>
+    <tr><td>Relationship between channels</td><td>Same function, different point (aliases)</td><td>Independent functions (no aliasing)</td></tr>
+    <tr><td>Replay risk</td><td>A captured channel-k sequence is a valid channel-0 sequence at another real time</td><td>None beyond the existing per-channel, per-window replay cache</td></tr>
+    <tr><td>Wire format change</td><td>None</td><td>+1 byte per HMAC message (breaking, versioned)</td></tr>
+  </table>
+
+  <h2 id="glossary">7. Glossary</h2>
+  <dl class="glossary">
+    <dt>HMAC (Hash-based Message Authentication Code)</dt>
+    <dd>A function that mixes a secret key into a hash so that only someone holding the key could have produced that output for a given message.</dd>
+
+    <dt>PRF (Pseudorandom Function)</dt>
+    <dd>The formal property HMAC has: indexed by a key, its outputs are indistinguishable from random unless you hold that key.</dd>
+
+    <dt>Digest</dt>
+    <dd>The fixed-size output of a hash function — here, 32 bytes from SHA-256.</dd>
+
+    <dt>Byte / big-endian</dt>
+    <dd>A byte is 8 bits, one number 0–255. "Big-endian" means the most significant byte of a multi-byte number comes first, left to right.</dd>
+
+    <dt>Concatenation (<code>||</code>)</dt>
+    <dd>Gluing two byte sequences end-to-end into one longer sequence, with no other combination or math involved.</dd>
+
+    <dt>Aliasing</dt>
+    <dd>Here: two different-looking inputs (a shifted time value under one channel vs. a later real time under another) producing the exact same output, because they were never independent to begin with.</dd>
+
+    <dt>Replay (attack)</dt>
+    <dd>Reusing a previously observed, valid message again later to trigger the same effect a second time, without knowing the underlying secret.</dd>
+
+    <dt>Nonce</dt>
+    <dd>A number used once — a value included specifically to make an otherwise-identical message unique, so it can't be replayed. Not used in this fix (the channel_id isn't a nonce; it's a permanent per-channel identifier).</dd>
+  </dl>
+
+</main>
+</body>
+</html>

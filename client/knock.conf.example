@@ -1,0 +1,8 @@
+[knock]
+keyfile = /etc/knockd/secret.key
+time_step = 30
+n_ports = 6
+port_low = 20000
+port_high = 60000
+knock_interval_ms = 100
+knock_proto = tcp-syn
