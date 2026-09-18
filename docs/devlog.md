@@ -235,3 +235,169 @@ The description panel grew a word-wrapped paragraph (via stdlib
 the digest cross-reference line, so moving onto e.g. the TTL byte now
 explains *why* IP packets have a hop limit at all, not just that this
 byte is "TTL."
+
+## 2026-09-15/16 — Phase 1: multi-channel signaling, built and verified
+
+Implemented the `channel_id`-as-second-hash-input design from
+`docs/channel-signaling-design.html`: the HMAC message grew from 8 bytes
+(`time_counter`) to 9 (`time_counter || channel_id`), a breaking protocol
+change (protocol v2) requiring client and server to be rebuilt together.
+Channel 0 keeps its exact old behavior (open the primary port); channels
+1-10 each run a pre-configured command via `fork`+`execve`, no shell, no
+arguments.
+
+On the server side, `SessionTracker`'s single `OpenPortCallback` became a
+`MatchCallback(source_ip, channel_id)` -- the tracker itself stays
+completely ignorant of what a channel *does*; `main.cpp` owns the
+dispatch (channel 0 -> `firewall.open_for`, others -> look up
+`channel_commands[channel_id]`). The replay cache key grew from
+`(source_ip, window)` to `(source_ip, window, channel_id)`, so spending
+one channel's window doesn't block another's. The matching loop now
+checks all 11 channels across the existing 3-window clock-skew tolerance
+-- 33 HMAC evaluations worst case per completed candidate, negligible.
+
+`firewall.cpp`'s fork/exec/waitpid logic got pulled out into a shared
+`proc.cpp::exec_and_wait()`, since the new `commands.cpp` (running
+channel scripts) needed the exact same pattern -- reuse instead of a
+second copy.
+
+The regression test that actually matters here is in `test_session.cpp`:
+a channel-3 sequence must produce a match tagged channel 3, never
+channel 0, and channel 1's replay-cache entry must not block channel 2 in
+the same window. Those two assertions are the concrete proof that the
+aliasing bug from the original time-shift idea is actually closed, not
+just argued away in the design doc.
+
+## 2026-09-16 — Phase 2: surviving `open_duration`, and a real "default-deny" mode
+
+A direct sequel to the netfilter chain-priority bug from 2026-09-14 --
+same underlying lesson, different symptom. The first real knock against
+the deployed Honeypot instance worked, but the SSH session it opened got
+cut off once `open_duration` (30s) elapsed. The fallback rule
+(`tcp dport target_port drop`) matches on destination port alone; it has
+no notion of "this packet belongs to a connection I already allowed," so
+it drops packets on an *already-established* session just as readily as
+a brand-new connection attempt.
+
+The fix is `ct state established,related accept`, inserted as the first
+rule in knockd's chain. Conntrack already classifies every packet by
+state per the full 5-tuple; established traffic now always matches this
+first rule regardless of the timed allow-set's expiry, while a genuinely
+new connection attempt (even from the same source IP) is still `new`
+state and still has to pass the allow-set check. No new dependency --
+`ct` matching is a standard nftables/kernel feature. Complementary,
+non-code takeaway: once persistence no longer depends on the timer,
+`open_duration` only needs to cover handshake time (a few seconds), not
+the whole session -- shrinks the window during which a second, unrelated
+knock could also get in, for free.
+
+The more interesting part came from a direct question: "if nftables
+blocked everything except port 22, would the knock still open 1221?"
+Answer: no, not if that policy lived in a *separate* chain -- it's the
+exact same multi-base-chain pitfall as the very first bug in this
+project, just approached from the opposite direction this time (the user
+asked before building it, rather than us discovering it after). An early
+`accept` in knockd's chain doesn't survive a later, independent chain's
+deny policy; "deny everything except my decoy port" has to live in
+knockd's *own* chain to actually work. Built as an opt-in
+`default_deny` + `always_allow_ports` mode in `FirewallConfig`, keeping
+today's narrower "only ever touch target_port" behavior as the default so
+no existing deployment's other services silently lose access. In
+`default_deny` mode the chain's own policy becomes the fallback `drop`,
+which also meant the explicit `tcp dport target_port drop` rule from the
+narrower mode is now redundant and skipped -- the policy already covers
+it.
+
+Two other ideas came up and were explicitly set aside rather than built:
+a per-IP firewall exception (imprecise -- conntrack's 5-tuple approach is
+strictly more correct, since it wouldn't accidentally admit a *second*
+new connection from the same IP), and sshd enforcing a hard
+single-connection limit (OpenSSH has no config option for this; building
+it ourselves would mean `knockd` detecting handshake completion and
+proactively revoking the allow-set entry -- real complexity, noted as a
+future option, not built).
+
+New e2e coverage: `e2e_netns_test.sh` gained a scenario that holds a raw
+TCP connection open (via bash's `/dev/tcp`, no extra binary needed)
+across the `open_duration` boundary and confirms it's still alive
+afterward. A new, separate script, `e2e_netns_default_deny_test.sh`,
+exercises `default_deny` mode specifically -- and needed one refinement
+to actually prove the point: checking for HTTP "not 200" can't
+distinguish a firewall *drop* (connection attempt times out) from a port
+that's merely closed because nothing's listening (connection refused
+immediately) -- both look like "failure" to a naive check. The test now
+inspects curl's actual exit code (28 for timeout, 7 for refused) to
+confirm unlisted ports are genuinely *dropped*, not just coincidentally
+unoccupied. Both e2e scripts passed cleanly, including the new
+held-connection scenario, before any of this touched the real instance.
+
+## 2026-09-17/18 — Deploying the fix exposed a bigger problem than the fix itself
+
+Redeploying Phase 2 to the real Honeypot instance kept failing in a way
+that looked like the fix wasn't working -- `nft list table inet knockd`
+kept showing the *old* 2-rule chain (no `ct state established` rule at
+all) no matter how many times the box was rebuilt. Two false leads
+first: a stale, non-idempotently-appended ruleset from before the fix
+(real, but not the actual blocker once flushed), and `sshd`'s
+`ClientAliveInterval` (120s x 3 retries = 360s -- far too lenient to
+explain a ~90s cutoff, ruled out cleanly).
+
+Root cause, once actually checked instead of guessed: the *tarball*
+being deployed was stale, or in one case the built binary didn't reflect
+a rebuild at all (the same class of "make thinks nothing changed because
+of preserved timestamps" bug from the very first deployment, recurring).
+This is what finally motivated switching the whole deployment path from
+scp/tar to a real git-based one: a private GitHub repo, a **read-only
+deploy key** generated *on* the Honeypot box (private half never
+transmitted, and read-only specifically because a compromise of a box
+literally named "Honeypot" should not be able to push anything) --
+`git pull` guarantees byte-for-byte parity with what's committed, which
+tar with preserved timestamps never did.
+
+Setting the deploy key up hit its own share of friction, all
+self-inflicted and all fixed by going back to basics: `git config
+core.sshCommand` only applies to the repo it's set in, so it vanished
+when a mid-setup ownership mismatch (mixing `sudo git` and plain `git`,
+producing a repo half-owned by `root`) forced a full `.git` wipe and
+re-init. The fix for a git ownership dispute is never "add more sudo" --
+git operations never need root; only starting `knockd` and touching
+`nftables` do.
+
+Then, after all of that finally worked and the deploy key correctly
+pulled the "fixed" commit down -- **the fix still wasn't there.** Not on
+the server, and not even in the *local* working copy on the dev machine,
+nor in what had actually been pushed to GitHub in the very first commit.
+`firewall.hpp`, `firewall.cpp`, `config.hpp`, `config.cpp`, `main.cpp`'s
+Phase 2 changes, and separately `README.md`'s entire Phase 1/2 rewrite,
+had all silently reverted to their pre-Phase-2 (in README's case,
+pre-Phase-0) state at some point -- while, oddly, the Phase 1 *code*
+(channel_id, multi-channel session matching, proc/commands.cpp) and
+this devlog's own Phase 0/0c entries survived intact. The most likely
+explanation is a sandbox/session persistence boundary somewhere in this
+multi-day conversation (the "date has changed" system reminders spanned
+several simulated days) reverting local files to an earlier checkpoint --
+not a mistake in the design or a git operation gone wrong. The exact
+mechanism was never fully pinned down, and wasn't worth chasing further
+once the practical fix was clear.
+
+The response was to stop trusting "it compiled" or "git said done" as
+proof of anything, and instead verify content directly at every step:
+`grep` the source for the expected string, `strings` the compiled
+*binary* for the same string (catching a `make` that silently skipped
+rebuilding), and `git diff HEAD origin/main` after every push (catching
+whether GitHub actually received what was just committed) -- before
+ever telling the server to pull. Re-applied all the missing edits,
+verified each of the three ways, and only then pushed and redeployed.
+
+Also added `server/knockd.service`: knockd had been running as a
+manually backgrounded shell process (`sudo ./knockd ... &`), which
+shares the invoking shell's stdout/stderr (debug logs interleaving with
+whatever you type) and dies the moment that shell session ends -- not a
+real deployment posture. Running it under systemd was already implied by
+config comments referencing `journalctl -u knockd`, just never actually
+set up until now.
+
+End state, finally confirmed live on the real instance rather than only
+in the isolated e2e tests: knock, SSH connects, and the session survives
+well past `open_duration` without being cut off -- the original bug
+report from two days earlier, actually closed.
