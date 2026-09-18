@@ -1,0 +1,20 @@
+[Unit]
+Description=knockd - port-knocking authorization daemon
+After=network.target
+
+[Service]
+Type=simple
+# Adjust this path if your checkout lives somewhere other than
+# /home/admin/PortKnocks -- it must point at the actual compiled binary.
+WorkingDirectory=/home/admin/PortKnocks/server
+ExecStart=/home/admin/PortKnocks/server/knockd --config /etc/knockd/knockd.conf
+Restart=on-failure
+RestartSec=2
+
+# Needs root for libpcap packet capture and nftables management. See
+# README.md for a capability-based (non-root) alternative if you want to
+# harden this further later -- not required to get a working daemon.
+User=root
+
+[Install]
+WantedBy=multi-user.target

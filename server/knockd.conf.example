@@ -10,15 +10,42 @@ replay_ttl = 90
 [server]
 interface = eth0
 target_port = 22
+# An already-established connection on target_port survives past
+# open_duration regardless (see the `ct state established,related accept`
+# rule knockd always installs first) -- only *new* connection attempts
+# are gated by this timer. So open_duration only needs to comfortably
+# cover the time it takes to complete a TCP handshake after a valid
+# knock, not the whole session lifetime; a short value (e.g. 5-10s)
+# narrows the window during which a second, unrelated knock could also
+# get in, without cutting off connections already in progress.
 open_duration = 30
-# Must run before whatever chain enforces the default-deny policy on
-# target_port -- lower priority values run earlier in nftables' input hook.
+# Priority within nftables' input hook; knockd's own chain owns the
+# complete policy described below regardless of this value (see
+# firewall.hpp) -- this mostly matters if you have other knockd-managed
+# chains and want to control their relative order.
 base_chain_priority = -10
 
 # debug | info | warn | error. debug logs every observed knock candidate
 # and every sequence reset -- noisy, but useful while setting things up.
 # Logs go to stderr; run knockd under systemd and use `journalctl -u knockd`.
 log_level = info
+
+# false (default): knockd only ever touches target_port -- an accept
+# rule for knocked-in source IPs, a fallback drop for everyone else on
+# that one port, nothing else on the host is affected.
+#
+# true: knockd's chain becomes the default-deny authority for the WHOLE
+# host, not just target_port -- its own policy is `drop`, so anything
+# not explicitly allowed below (or already an established connection)
+# is blocked. Use always_allow_ports for anything that must stay
+# reachable regardless of any knock (e.g. a decoy/monitored port). This
+# only works because it's all in knockd's own chain -- adding a
+# SEPARATE "block everything except port 22" chain elsewhere on the
+# host will NOT reliably override knockd's own accept decisions; see
+# firewall.hpp's comment for why (independent nftables base chains at
+# the same hook don't override each other's terminal verdicts).
+# default_deny = true
+# always_allow_ports = 22
 
 # Channel 0 always means "open target_port above" -- not configurable here.
 # Channels 1-10 each run one pre-configured command, with no arguments,
