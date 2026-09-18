@@ -69,6 +69,29 @@ std::string get_string(const SectionMap &sections, const std::string &section, c
     return kit->second;
 }
 
+bool get_bool(const SectionMap &sections, const std::string &section, const std::string &key, bool fallback) {
+    auto sit = sections.find(section);
+    if (sit == sections.end()) return fallback;
+    auto kit = sit->second.find(key);
+    if (kit == sit->second.end()) return fallback;
+    return kit->second == "true" || kit->second == "1" || kit->second == "yes";
+}
+
+std::vector<uint16_t> get_port_list(const SectionMap &sections, const std::string &section, const std::string &key) {
+    std::vector<uint16_t> ports;
+    auto sit = sections.find(section);
+    if (sit == sections.end()) return ports;
+    auto kit = sit->second.find(key);
+    if (kit == sit->second.end()) return ports;
+
+    std::istringstream stream(kit->second);
+    std::string token;
+    while (stream >> token) {
+        ports.push_back(static_cast<uint16_t>(std::stoi(token)));
+    }
+    return ports;
+}
+
 std::map<int, std::string> parse_channel_commands(const SectionMap &sections) {
     std::map<int, std::string> commands;
     for (int channel = 1; channel < kNumChannels; ++channel) {
@@ -99,6 +122,8 @@ ServerConfig load_server_config(const std::string &path) {
     cfg.target_port = static_cast<uint16_t>(get_int(sections, "server", "target_port", 22));
     cfg.open_duration_seconds = get_int(sections, "server", "open_duration", 30);
     cfg.base_chain_priority = get_int(sections, "server", "base_chain_priority", -10);
+    cfg.default_deny = get_bool(sections, "server", "default_deny", false);
+    cfg.always_allow_ports = get_port_list(sections, "server", "always_allow_ports");
     cfg.log_level = get_string(sections, "server", "log_level", "info");
 
     cfg.channel_commands = parse_channel_commands(sections);

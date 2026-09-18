@@ -21,3 +21,4 @@ server/test_session
 # Not project content
 .claude/
 QUICKREF.md
+sources.json

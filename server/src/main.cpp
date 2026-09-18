@@ -64,6 +64,8 @@ int main(int argc, char **argv) {
         fw_cfg.target_port = cfg.target_port;
         fw_cfg.base_chain_priority = cfg.base_chain_priority;
         fw_cfg.open_duration = std::chrono::seconds(cfg.open_duration_seconds);
+        fw_cfg.default_deny = cfg.default_deny;
+        fw_cfg.always_allow_ports = cfg.always_allow_ports;
         knockd::Firewall firewall(fw_cfg);
         firewall.ensure_base_ruleset();
 

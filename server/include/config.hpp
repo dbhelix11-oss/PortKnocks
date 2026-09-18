@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace knockd {
 
@@ -21,6 +22,14 @@ struct ServerConfig {
     uint16_t target_port = 22;
     int open_duration_seconds = 30;
     int base_chain_priority = -10;
+
+    // See firewall.hpp's FirewallConfig comment for what these mean --
+    // default_deny=false (the default) preserves knockd's original
+    // narrow behavior (only ever touches target_port); default_deny=true
+    // makes knockd's chain the default-deny authority for the whole
+    // host, with always_allow_ports reachable regardless of any knock.
+    bool default_deny = false;
+    std::vector<uint16_t> always_allow_ports;
 
     std::string log_level = "info"; // debug | info | warn | error
 
