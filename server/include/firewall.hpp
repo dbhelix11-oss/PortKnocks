@@ -22,6 +22,12 @@ namespace knockd {
 // is what stops target_ports' timer from severing an already-open session
 // out from under you. The same holds for any channel_port_groups port.
 //
+// Right after that, unconditionally: `iif "lo" accept`. Source-IP knock
+// gating can never admit a connection that arrives over loopback (e.g. an
+// SSM/local port-forwarding agent connecting to 127.0.0.1:<port> on the
+// instance's own behalf) -- see firewall.cpp's comment at that rule for
+// why, and why it's safe regardless of default_deny.
+//
 // Two modes, chosen by `default_deny`:
 //  - default_deny = false (default): chain policy `accept`; the only
 //    thing knockd's chain actively enforces is target_ports and any

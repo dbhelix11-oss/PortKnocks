@@ -68,7 +68,10 @@ EOF
 chmod +x "$WORK_DIR/channel1.sh"
 
 echo "--- starting a plain HTTP server as the 'protected service' on port $TARGET_PORT ---"
-ip netns exec "$NS_SERVER" python3 -m http.server "$TARGET_PORT" --bind "$SRV_IP" \
+# Bound to all addresses (not just $SRV_IP) so step 4b below can also reach
+# it over loopback, from inside the server namespace itself -- proving the
+# new `iif "lo" accept` rule, not just the veth-facing knock/deny rules.
+ip netns exec "$NS_SERVER" python3 -m http.server "$TARGET_PORT" --bind 0.0.0.0 \
     >"$WORK_DIR/httpd.log" 2>&1 &
 HTTPD_PID=$!
 sleep 0.5
@@ -144,6 +147,11 @@ sleep "$((OPEN_DURATION + 3))"
 CODE_EXPIRED=$(test_curl)
 echo "http code after expiry: $CODE_EXPIRED"
 
+echo "--- 4b) loopback bypasses the knock gate even with no valid set entry ---"
+CODE_LOOPBACK=$(ip netns exec "$NS_SERVER" curl -s -o /dev/null -w '%{http_code}' \
+    --max-time 2 "http://127.0.0.1:$TARGET_PORT/" || true)
+echo "http code via loopback (post-expiry, unknocked): $CODE_LOOPBACK"
+
 echo "--- 5) sending a channel-1 knock (run_command action, not port-opening) ---"
 rm -f "$WORK_DIR/channel1_marker"
 ip netns exec "$NS_CLIENT" env PYTHONPATH="$CLIENT_DIR" "$CLIENT_DIR/.venv/bin/python" -m knockc.cli \
@@ -158,6 +166,7 @@ PASS=1
 [[ "$CODE_BEFORE" != "200" ]] || { echo "FAIL: request succeeded before knocking"; PASS=0; }
 [[ "$CODE_AFTER" == "200" ]] || { echo "FAIL: request did not succeed after knocking"; PASS=0; }
 [[ "$CODE_EXPIRED" != "200" ]] || { echo "FAIL: request still succeeds after open_duration expired"; PASS=0; }
+[[ "$CODE_LOOPBACK" == "200" ]] || { echo "FAIL: loopback request blocked despite no valid knock (got $CODE_LOOPBACK)"; PASS=0; }
 [[ "$CHANNEL1_MARKER_EXISTS" == "1" ]] || { echo "FAIL: channel 1's command did not run"; PASS=0; }
 
 if [[ "$PASS" == "1" ]]; then

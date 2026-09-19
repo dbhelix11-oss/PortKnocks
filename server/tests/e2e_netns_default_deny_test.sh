@@ -69,7 +69,12 @@ echo "--- starting two plain HTTP servers: one always-allowed, one knock-gated -
 ip netns exec "$NS_SERVER" python3 -m http.server "$ALWAYS_PORT" --bind "$SRV_IP" \
     >"$WORK_DIR/always_httpd.log" 2>&1 &
 ALWAYS_HTTPD_PID=$!
-ip netns exec "$NS_SERVER" python3 -m http.server "$TARGET_PORT" --bind "$SRV_IP" \
+# Bound to all addresses (not just $SRV_IP) so the loopback check below can
+# also reach it, from inside the server namespace itself -- proving the new
+# `iif "lo" accept` rule holds even under default_deny's drop-everything
+# policy, the same way it must for e.g. an SSM-forwarded connection hitting
+# a knock-gated port via 127.0.0.1.
+ip netns exec "$NS_SERVER" python3 -m http.server "$TARGET_PORT" --bind 0.0.0.0 \
     >"$WORK_DIR/target_httpd.log" 2>&1 &
 TARGET_HTTPD_PID=$!
 sleep 0.5
@@ -138,6 +143,25 @@ check_port() {
     esac
 }
 
+# Same, but issued from inside NS_SERVER itself against 127.0.0.1 -- the
+# `iif "lo" accept` rule should let this through regardless of any knock or
+# always_allow_ports, the same way an SSM-forwarded connection would land.
+check_port_loopback() {
+    local port=$1
+    local out rc
+    set +e
+    out=$(ip netns exec "$NS_SERVER" curl -s -o /dev/null -w '%{http_code}' --max-time 2 \
+        "http://127.0.0.1:$port/" 2>/dev/null)
+    rc=$?
+    set -e
+    case "$rc" in
+        28) echo "TIMEOUT" ;;
+        7)  echo "REFUSED" ;;
+        0)  echo "OK:$out" ;;
+        *)  echo "OTHER:$rc" ;;
+    esac
+}
+
 echo "--- 1) always_allow_ports reachable with no knock at all ---"
 RESULT_ALWAYS_BEFORE=$(check_port "$ALWAYS_PORT")
 echo "always_allow port result (before any knock): $RESULT_ALWAYS_BEFORE"
@@ -149,6 +173,10 @@ echo "unlisted port result: $RESULT_UNLISTED_BEFORE"
 echo "--- 3) target_port is dropped before any knock ---"
 RESULT_TARGET_BEFORE=$(check_port "$TARGET_PORT")
 echo "target_port result (before knock): $RESULT_TARGET_BEFORE"
+
+echo "--- 3b) target_port still reachable over loopback despite default_deny + no knock ---"
+RESULT_LOOPBACK_BEFORE=$(check_port_loopback "$TARGET_PORT")
+echo "loopback result (before any knock): $RESULT_LOOPBACK_BEFORE"
 
 echo "--- 4) knocking channel 0 ---"
 if [[ ! -d "$CLIENT_DIR/.venv" ]]; then
@@ -172,6 +200,7 @@ PASS=1
 [[ "$RESULT_ALWAYS_BEFORE" == "OK:200" ]] || { echo "FAIL: always_allow_port not reachable before any knock"; PASS=0; }
 [[ "$RESULT_UNLISTED_BEFORE" == "TIMEOUT" ]] || { echo "FAIL: unlisted port not dropped before any knock (got $RESULT_UNLISTED_BEFORE)"; PASS=0; }
 [[ "$RESULT_TARGET_BEFORE" == "TIMEOUT" ]] || { echo "FAIL: target_port not dropped before knock (got $RESULT_TARGET_BEFORE)"; PASS=0; }
+[[ "$RESULT_LOOPBACK_BEFORE" == "OK:200" ]] || { echo "FAIL: target_port not reachable over loopback despite no knock (got $RESULT_LOOPBACK_BEFORE)"; PASS=0; }
 [[ "$RESULT_TARGET_AFTER" == "OK:200" ]] || { echo "FAIL: target_port not reachable after a valid knock (got $RESULT_TARGET_AFTER)"; PASS=0; }
 [[ "$RESULT_ALWAYS_AFTER" == "OK:200" ]] || { echo "FAIL: always_allow_port broken after a knock (got $RESULT_ALWAYS_AFTER)"; PASS=0; }
 [[ "$RESULT_UNLISTED_AFTER" == "TIMEOUT" ]] || { echo "FAIL: unlisted port opened up after an unrelated knock (got $RESULT_UNLISTED_AFTER)"; PASS=0; }

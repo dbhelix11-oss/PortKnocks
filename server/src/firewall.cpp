@@ -86,6 +86,30 @@ void Firewall::ensure_base_ruleset() const {
     run_nft({"add", "rule", config_.family, config_.table, config_.chain,
              "ct state established,related accept"});
 
+    // Second, always: accept anything arriving over the loopback interface,
+    // unconditionally, before any knock-gated rule gets a chance to drop it.
+    //
+    // Source-IP-based knock gating (below) structurally cannot admit a
+    // connection that arrives over loopback: something like an SSM
+    // port-forwarding session doesn't proxy the remote client's IP onto the
+    // instance -- the local agent that terminates it opens its OWN new
+    // connection to 127.0.0.1:<port>, so nftables sees the connecting
+    // address as 127.0.0.1, which no knock ever puts in a knockd_allowed
+    // set (knocks only ever register the real external IP that sent them).
+    // Diagnosed live: a knock-gated operator-SSH port, reached only via
+    // `aws ssm start-session ... AWS-StartPortForwardingSession`, dropped
+    // every single attempt regardless of how many valid knocks preceded it,
+    // because the traffic knockd actually saw never carried the knocking
+    // IP in the first place.
+    //
+    // Safe to allow unconditionally, in both default_deny modes: a real
+    // loopback-sourced TCP connection cannot be forged by anything off-box
+    // over a genuine handshake, so this doesn't weaken the policy against
+    // the actual threat model (an external, unauthenticated attacker) --
+    // it only stops the knock gate from also blocking the box's own local
+    // processes (or anything else, like SSM, that proxies through one).
+    run_nft({"add", "rule", config_.family, config_.table, config_.chain, "iif \"lo\" accept"});
+
     if (config_.default_deny) {
         // Ports that are always reachable regardless of any knock (e.g. a
         // decoy port you want open no matter what).
