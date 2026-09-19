@@ -9,6 +9,9 @@ replay_ttl = 90
 
 [server]
 interface = eth0
+# One port, or several separated by commas and/or whitespace (e.g.
+# `22, 80 443`) -- a channel-0 knock opens all of them together for the
+# knocking source IP, via the same timed allow-set.
 target_port = 22
 # An already-established connection on target_port survives past
 # open_duration regardless (see the `ct state established,related accept`
@@ -48,14 +51,29 @@ log_level = info
 # always_allow_ports = 22
 
 # Channel 0 always means "open target_port above" -- not configurable here.
-# Channels 1-10 each run one pre-configured command, with no arguments,
-# when that channel's knock sequence is verified. A channel with no
-# [channel.N] section (or no `command` key) logs a warning and does
-# nothing. See docs/channel-signaling-design.html for why channels are a
-# separate hashed input rather than a time-shifted variant of channel 0.
+# Channels 1-10 each run exactly ONE of two actions, set in their own
+# [channel.N] section, when that channel's knock sequence is verified:
+#
+#   command = <path>       run this command, no arguments (fork+execve,
+#                           never a shell)
+#   open_port = <N[, N...]>  open this port (or these ports, comma-
+#                           and/or whitespace-separated, same grammar as
+#                           target_port above) for the knocking source IP,
+#                           the same way channel 0 opens target_port --
+#                           its own timed allow-set, independent of
+#                           channel 0's and every other channel's.
+#
+# Setting both in the same [channel.N] section is a config error (knockd
+# refuses to start). A channel with no [channel.N] section, or one with
+# neither key, logs a warning and does nothing when it fires. See
+# docs/channel-signaling-design.html for why channels are a separate
+# hashed input rather than a time-shifted variant of channel 0.
 #
 # [channel.1]
 # command = /etc/knockd/scripts/channel1.sh
 #
 # [channel.2]
-# command = /etc/knockd/scripts/channel2.sh
+# open_port = 8080
+#
+# [channel.3]
+# open_port = 8080, 8443

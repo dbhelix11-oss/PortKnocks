@@ -15,9 +15,10 @@ full story behind any of the design decisions mentioned here.
   and includes a packet-preview/byte-inspector console (see below).
 - `server/` — C++ daemon (`knockd`) that passively sniffs for the
   sequence (via libpcap — it never opens a listening socket on the knock
-  ports) and, on a verified match, either opens the target port for that
-  source IP (channel 0) or runs a pre-configured command (channels 1-10),
-  via an nftables rule with kernel-enforced expiry.
+  ports) and, on a verified match, either opens one or more target ports
+  for that source IP (channel 0) or runs a channel's configured action —
+  a command, or opening that channel's own port(s) (channels 1-10) — via
+  an nftables rule with kernel-enforced expiry.
 - `spec/` — the language-agnostic derivation spec and cross-language test
   vectors both implementations are checked against.
 - `docs/` — the channel-design writeup and the project devlog.
@@ -55,9 +56,17 @@ A knock sequence means one of 11 things, selected by `channel_id`
 - **Channel 0**: open the configured `target_port` for the knocking
   source IP, for `open_duration` seconds (or indefinitely for an
   already-established connection — see "Firewall integration" below).
-- **Channels 1-10**: run a pre-configured command on the server, with no
-  arguments (`[channel.N]` sections in `knockd.conf`, `command = ...`).
-  A channel with no configured command logs a warning and does nothing.
+  `target_port` can list more than one port (comma- and/or whitespace-
+  separated, e.g. `22, 80 443`); a channel-0 knock opens all of them
+  together, via the same timed allow-set.
+- **Channels 1-10**: each runs exactly one of two configured actions, set
+  in that channel's `[channel.N]` section in `knockd.conf`: `command =
+  <path>` (a pre-configured command, no arguments) or `open_port = <N[,
+  N...]>` (open that port, or those ports, for the knocking source IP —
+  same multi-port grammar as `target_port`, its own timed allow-set,
+  independent of channel 0's). Setting both keys in one section is a
+  config error. A channel with no configured action logs a warning and
+  does nothing.
 
 `channel_id` is a permanent, public part of the protocol, not a secret —
 it's concatenated onto the HMAC message as an independent input

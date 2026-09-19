@@ -7,15 +7,18 @@ from .derive import NUM_CHANNELS, derive_ports, time_counter
 from .keyfile import KeyfilePermissionError, load_secret
 from .preview import render_preview
 from .sender import send_knocks
+from .sshconfig import resolve_target
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="knockc", description="Send a derived port-knock sequence")
     parser.add_argument("--config", required=True, help="Path to knock.conf")
-    parser.add_argument("--target", required=True, help="Target host to knock")
+    parser.add_argument("--target", required=True,
+                         help="Target host to knock (IP, hostname, or an ~/.ssh/config Host alias)")
     parser.add_argument("--channel", type=int, default=0,
-                         help=f"Channel to knock, 0-{NUM_CHANNELS - 1} (default 0 = open the primary port; "
-                              f"1-{NUM_CHANNELS - 1} run a server-configured command)")
+                         help=f"Channel to knock, 0-{NUM_CHANNELS - 1} (default 0 = open the configured "
+                              f"target port(s); 1-{NUM_CHANNELS - 1} run a server-configured action -- "
+                              f"a command, or opening that channel's own port(s))")
     parser.add_argument("--preview", action="store_true",
                          help="Show the derivation and the exact packet bytes, then exit without sending")
     parser.add_argument("--reveal-secret", action="store_true",
@@ -27,6 +30,11 @@ def main(argv: list[str] | None = None) -> int:
     if not (0 <= args.channel < NUM_CHANNELS):
         print(f"error: --channel must be between 0 and {NUM_CHANNELS - 1}", file=sys.stderr)
         return 2
+
+    resolved_target, was_alias = resolve_target(args.target)
+    if was_alias:
+        print(f"resolved --target {args.target!r} via ~/.ssh/config to {resolved_target}", file=sys.stderr)
+        args.target = resolved_target
 
     cfg = load_config(args.config)
 

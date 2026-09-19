@@ -61,11 +61,16 @@ int main(int argc, char **argv) {
         std::vector<uint8_t> secret = load_secret(cfg.keyfile);
 
         knockd::FirewallConfig fw_cfg;
-        fw_cfg.target_port = cfg.target_port;
+        fw_cfg.target_ports = cfg.target_ports;
         fw_cfg.base_chain_priority = cfg.base_chain_priority;
         fw_cfg.open_duration = std::chrono::seconds(cfg.open_duration_seconds);
         fw_cfg.default_deny = cfg.default_deny;
         fw_cfg.always_allow_ports = cfg.always_allow_ports;
+        for (const auto &[channel_id, action] : cfg.channel_actions) {
+            if (!action.open_ports.empty()) {
+                fw_cfg.channel_port_groups[channel_id] = action.open_ports;
+            }
+        }
         knockd::Firewall firewall(fw_cfg);
         firewall.ensure_base_ruleset();
 
@@ -80,8 +85,13 @@ int main(int argc, char **argv) {
 
         knockd::SessionTracker tracker(sess_cfg, [&firewall, &cfg](const std::string &source_ip, int channel_id) {
             if (channel_id == 0) {
-                LOG_INFO("knock verified from %s on channel 0, opening port %u for %ds", source_ip.c_str(),
-                         cfg.target_port, cfg.open_duration_seconds);
+                std::string ports_str;
+                for (uint16_t port : cfg.target_ports) {
+                    if (!ports_str.empty()) ports_str += ",";
+                    ports_str += std::to_string(port);
+                }
+                LOG_INFO("knock verified from %s on channel 0, opening port(s) %s for %ds", source_ip.c_str(),
+                         ports_str.c_str(), cfg.open_duration_seconds);
                 try {
                     firewall.open_for(source_ip);
                 } catch (const std::exception &e) {
@@ -90,18 +100,35 @@ int main(int argc, char **argv) {
                 return;
             }
 
-            auto it = cfg.channel_commands.find(channel_id);
-            if (it == cfg.channel_commands.end()) {
-                LOG_WARN("knock verified from %s on channel %d, but no command is configured for it "
+            auto it = cfg.channel_actions.find(channel_id);
+            if (it == cfg.channel_actions.end()) {
+                LOG_WARN("knock verified from %s on channel %d, but no action is configured for it "
                          "(add [channel.%d] to knockd.conf) -- ignoring",
                          source_ip.c_str(), channel_id, channel_id);
                 return;
             }
 
+            const knockd::ServerConfig::ChannelAction &action = it->second;
+            if (!action.open_ports.empty()) {
+                std::string ports_str;
+                for (uint16_t port : action.open_ports) {
+                    if (!ports_str.empty()) ports_str += ",";
+                    ports_str += std::to_string(port);
+                }
+                LOG_INFO("knock verified from %s on channel %d, opening port(s) %s", source_ip.c_str(), channel_id,
+                          ports_str.c_str());
+                try {
+                    firewall.open_port_for(source_ip, channel_id);
+                } catch (const std::exception &e) {
+                    LOG_ERROR("firewall.open_port_for failed: %s", e.what());
+                }
+                return;
+            }
+
             LOG_INFO("knock verified from %s on channel %d, running %s", source_ip.c_str(), channel_id,
-                      it->second.c_str());
+                      action.command.c_str());
             try {
-                knockd::run_channel_command(it->second);
+                knockd::run_channel_command(action.command);
             } catch (const std::exception &e) {
                 LOG_ERROR("channel %d command failed: %s", channel_id, e.what());
             }

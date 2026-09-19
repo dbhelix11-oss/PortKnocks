@@ -401,3 +401,46 @@ End state, finally confirmed live on the real instance rather than only
 in the isolated e2e tests: knock, SSH connects, and the session survives
 well past `open_duration` without being cut off -- the original bug
 report from two days earlier, actually closed.
+
+## 2026-09-19 — Generalizing "open a port" (finally picking up the deferred item)
+
+Two related pieces of the deferred "generalize the open-a-port action"
+item (see the 2026-09-14 entry and `spec/derivation.md`'s "Which service
+port opens" section) got built together, since they touch the same
+config-parsing and firewall code:
+
+1. **Channels 1-10 can now open a port instead of running a command.**
+   Each `[channel.N]` section takes exactly one of `command = <path>` or
+   `open_port = <N[, N...]>` (`config.cpp`'s `parse_channel_actions`
+   throws if a section sets both). An `open_port` channel gets its own
+   nftables set (`knockd_allowed_ch<N>`) and its own accept/drop rule
+   pair per port, independent of channel 0's set and every other
+   channel's -- so a channel-3 knock can't be replayed to also open
+   whatever channel-5 opens, and vice versa. Channel 0 itself is still
+   hardcoded to "open ports," not reconfigurable to run a command --
+   kept that asymmetry deliberately (see the updated `spec/
+   derivation.md`), so no config edit can turn the default channel into
+   "run a command" behavior.
+2. **`target_port` (and the new `open_port`) now accept a list**, comma-
+   and/or whitespace-separated (`22, 80 443`), not just one port. A
+   channel-0 knock opens all of `target_port`'s ports together, via the
+   same set -- this was the smaller of the two changes since it reuses
+   the exact machinery already built for (1): both are just "a named
+   port group, opened together by one timed set," whether it's the
+   primary group or a channel's own.
+
+`Firewall::setup_port_group()` is the shared piece: given a set name and
+a port list, it creates the set and, per port, the accept-if-in-set rule
+plus (unless `default_deny`) the explicit drop -- called once for the
+primary `target_port` group and once per configured `open_port` channel.
+`ensure_base_ruleset()` no longer hardcodes a single target-port rule
+pair at all; it's just two calls into that shared helper now.
+
+New `server/tests/test_config.cpp` covers the parsing side (multi-port
+lists via both delimiters, single-key channels, the both-keys-is-an-error
+case) since there wasn't previously any direct unit coverage of
+`config.cpp` -- the existing `make test` target only covered `derive`
+and `session`. Not deployed to the real Honeypot instance as part of
+this change; its `knockd.conf` still has a single `target_port` and no
+`open_port` channels, so behavior there is unaffected until it's
+intentionally reconfigured.

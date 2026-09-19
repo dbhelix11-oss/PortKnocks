@@ -2,8 +2,10 @@
 byte-for-byte -- see spec/testvectors.json for the cross-language parity tests.
 
 Protocol v2: the HMAC message is time_counter (8 bytes, big-endian)
-concatenated with channel_id (1 byte). channel_id 0 is "open the primary
-port" (the entire v1 behavior); 1-10 each run a server-configured command.
+concatenated with channel_id (1 byte). channel_id 0 opens its configured
+target port(s) (the entire v1 behavior, now possibly more than one port);
+1-10 each run a server-configured action -- a command, or opening that
+channel's own port(s).
 """
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.hmac import HMAC

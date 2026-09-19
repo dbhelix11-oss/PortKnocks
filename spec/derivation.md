@@ -72,12 +72,19 @@ for the given `(time_counter, channel_id)` pair.
 
 A knock sequence now means one of 11 things, selected by `channel_id`:
 
-- **Channel 0**: open the configured primary port for the knocking
-  source IP (this is the entire v1 behavior, now under an explicit id).
-- **Channels 1-10**: run a pre-configured command on the server, with no
-  arguments. Each channel's command is set independently in server
-  config (`[channel.N]` sections); a channel with no configured command
-  logs a warning and does nothing.
+- **Channel 0**: open the configured `target_port` port(s) for the
+  knocking source IP (this is the entire v1 behavior, now under an
+  explicit id). `target_port` may list more than one port; a channel-0
+  knock opens all of them together, for the same source IP, via one
+  timed allow-set.
+- **Channels 1-10**: each runs exactly one of two configured actions, set
+  independently per channel in server config (`[channel.N]` sections):
+  `command = <path>` (run it, no arguments) or `open_port = <N[, N...]>`
+  (open that port, or those ports, for the knocking source IP, the same
+  way channel 0 opens `target_port` — its own timed allow-set, so it
+  doesn't also open channel 0's or another channel's ports). A section
+  setting both keys is a config error; a channel with no configured
+  action logs a warning and does nothing.
 
 Channels are **not** a nonce or a security boundary between each other
 beyond what the HMAC already provides — `channel_id` is a permanent,
@@ -134,9 +141,10 @@ of observed destination ports ("candidate sequence"):
   channel-1 window does not block channel-2 in that same window, and
   vice versa. If already present, the match is rejected (spent).
   Otherwise, the tuple is recorded (TTL `3*T`) and the server dispatches
-  on `c` (see "Channels" above): channel 0 opens the configured target
-  port for that source IP for `OPEN_DURATION` seconds; channels 1-10 run
-  that channel's configured command.
+  on `c` (see "Channels" above): channel 0 opens the configured
+  `target_port` port(s) for that source IP for `OPEN_DURATION` seconds;
+  channels 1-10 run that channel's configured action (a command, or
+  opening that channel's own port(s)).
 
 ## Replay defense model (explicit tradeoff)
 
@@ -154,12 +162,17 @@ further in a later version with a nonce embedded in the packet stream.
 ## Which service port opens / which command runs
 
 Fixed mapping in server configuration, not transmitted by the client:
-channel 0 always opens one pre-configured target port (e.g. "a valid
-channel-0 knock opens port 22"); channels 1-10 each run one
-pre-configured command. This avoids adding a second,
-unauthenticated-until-verified input (e.g. a client-specified port or
-command) that the server would need to allowlist-check regardless of how
-it arrived. Generalizing this into a fully configurable action per
-channel (so channel 0 could also be reconfigured to run a command, or
-any channel could open a port) is deliberately deferred — v1 keeps
-channel 0's behavior exactly as it was before channels existed.
+channel 0 always opens its configured `target_port` port(s) (e.g. "a
+valid channel-0 knock opens ports 22 and 8443"); channels 1-10 each run
+one configured action, either a command or opening that channel's own
+port(s). This avoids adding a second, unauthenticated-until-verified
+input (e.g. a client-specified port or command) that the server would
+need to allowlist-check regardless of how it arrived -- the client only
+ever selects a `channel_id`; what that channel *does* is entirely a
+pre-verified, server-side decision.
+
+Channel 0 itself still can't be reconfigured to run an arbitrary command
+(it's hardcoded to "open target_port's ports"); only channels 1-10 can be
+set to `command`. That narrower asymmetry is deliberate, not an
+oversight: it guarantees a channel-0 knock can never be turned into "run
+a command" behavior no matter how `knockd.conf` is edited.

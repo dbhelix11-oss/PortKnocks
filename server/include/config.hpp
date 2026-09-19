@@ -19,7 +19,12 @@ struct ServerConfig {
     int replay_ttl_seconds = 90;
 
     std::string interface;
-    uint16_t target_port = 22;
+    // Ports a channel-0 knock opens, all together, for the knocking
+    // source IP. Config key is still singular (`target_port`) for
+    // backward compatibility with existing knockd.conf files -- its
+    // value now accepts a comma- and/or whitespace-separated list.
+    // Defaults to {22} if unset.
+    std::vector<uint16_t> target_ports = {22};
     int open_duration_seconds = 30;
     int base_chain_priority = -10;
 
@@ -34,11 +39,19 @@ struct ServerConfig {
     std::string log_level = "info"; // debug | info | warn | error
 
     // Channel 0 is not configured here -- it's hardcoded to opening
-    // target_port (see main.cpp's dispatch). channel_commands maps
-    // channel_id (1..10) -> the command path from that channel's
-    // [channel.N] section; a channel with no entry here that still fires
-    // is logged and otherwise ignored.
-    std::map<int, std::string> channel_commands;
+    // target_ports (see main.cpp's dispatch). Channels 1-10 each run
+    // exactly one of two mutually exclusive actions, set in that
+    // channel's [channel.N] section: `command = <path>` (run it, no
+    // args) or `open_port = <N[, N...]>` (open those ports, together,
+    // for the knocking source IP, the same way channel 0 opens
+    // target_ports). A channel with no [channel.N] section, or one with
+    // neither key, is logged and otherwise ignored when it fires;
+    // load_server_config throws if a section sets both keys.
+    struct ChannelAction {
+        std::string command;             // empty if open_ports is used
+        std::vector<uint16_t> open_ports; // empty if command is used
+    };
+    std::map<int, ChannelAction> channel_actions;
 };
 
 ServerConfig load_server_config(const std::string &path);

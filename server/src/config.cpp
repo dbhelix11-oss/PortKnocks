@@ -77,14 +77,15 @@ bool get_bool(const SectionMap &sections, const std::string &section, const std:
     return kit->second == "true" || kit->second == "1" || kit->second == "yes";
 }
 
-std::vector<uint16_t> get_port_list(const SectionMap &sections, const std::string &section, const std::string &key) {
+// Accepts comma- and/or whitespace-separated ports in the same value
+// (e.g. "22, 80 443") so operators can use whichever reads more naturally.
+std::vector<uint16_t> parse_port_list(const std::string &raw) {
+    std::string cleaned = raw;
+    for (char &c : cleaned) {
+        if (c == ',') c = ' ';
+    }
     std::vector<uint16_t> ports;
-    auto sit = sections.find(section);
-    if (sit == sections.end()) return ports;
-    auto kit = sit->second.find(key);
-    if (kit == sit->second.end()) return ports;
-
-    std::istringstream stream(kit->second);
+    std::istringstream stream(cleaned);
     std::string token;
     while (stream >> token) {
         ports.push_back(static_cast<uint16_t>(std::stoi(token)));
@@ -92,16 +93,40 @@ std::vector<uint16_t> get_port_list(const SectionMap &sections, const std::strin
     return ports;
 }
 
-std::map<int, std::string> parse_channel_commands(const SectionMap &sections) {
-    std::map<int, std::string> commands;
+std::vector<uint16_t> get_port_list(const SectionMap &sections, const std::string &section, const std::string &key,
+                                     const std::vector<uint16_t> &fallback = {}) {
+    auto sit = sections.find(section);
+    if (sit == sections.end()) return fallback;
+    auto kit = sit->second.find(key);
+    if (kit == sit->second.end()) return fallback;
+    return parse_port_list(kit->second);
+}
+
+std::map<int, ServerConfig::ChannelAction> parse_channel_actions(const SectionMap &sections) {
+    std::map<int, ServerConfig::ChannelAction> actions;
     for (int channel = 1; channel < kNumChannels; ++channel) {
         auto sit = sections.find("channel." + std::to_string(channel));
         if (sit == sections.end()) continue;
-        auto kit = sit->second.find("command");
-        if (kit == sit->second.end()) continue;
-        commands[channel] = kit->second;
+
+        auto cmd_it = sit->second.find("command");
+        auto port_it = sit->second.find("open_port");
+        bool has_command = cmd_it != sit->second.end();
+        bool has_open_port = port_it != sit->second.end();
+        if (!has_command && !has_open_port) continue;
+        if (has_command && has_open_port) {
+            throw std::runtime_error("[channel." + std::to_string(channel) +
+                                      "] sets both command and open_port -- a channel must use exactly one");
+        }
+
+        ServerConfig::ChannelAction action;
+        if (has_command) {
+            action.command = cmd_it->second;
+        } else {
+            action.open_ports = parse_port_list(port_it->second);
+        }
+        actions[channel] = std::move(action);
     }
-    return commands;
+    return actions;
 }
 
 } // namespace
@@ -119,14 +144,17 @@ ServerConfig load_server_config(const std::string &path) {
     cfg.replay_ttl_seconds = get_int(sections, "knock", "replay_ttl", 90);
 
     cfg.interface = require(sections, "server", "interface");
-    cfg.target_port = static_cast<uint16_t>(get_int(sections, "server", "target_port", 22));
+    cfg.target_ports = get_port_list(sections, "server", "target_port", {22});
+    if (cfg.target_ports.empty()) {
+        throw std::runtime_error("server.target_port must list at least one port");
+    }
     cfg.open_duration_seconds = get_int(sections, "server", "open_duration", 30);
     cfg.base_chain_priority = get_int(sections, "server", "base_chain_priority", -10);
     cfg.default_deny = get_bool(sections, "server", "default_deny", false);
     cfg.always_allow_ports = get_port_list(sections, "server", "always_allow_ports");
     cfg.log_level = get_string(sections, "server", "log_level", "info");
 
-    cfg.channel_commands = parse_channel_commands(sections);
+    cfg.channel_actions = parse_channel_actions(sections);
 
     return cfg;
 }
