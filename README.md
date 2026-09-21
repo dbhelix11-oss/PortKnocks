@@ -170,6 +170,23 @@ Both require no network access and send nothing; `--reveal-secret`
 (only meaningful with `--preview`) shows the raw secret instead of a
 one-way fingerprint, for when you genuinely need to eyeball it.
 
+#### GUI
+
+```
+.venv/bin/python -m knockc.gui          # preview only, no root needed
+sudo .venv/bin/python -m knockc.gui     # needed to actually send a knock
+```
+A Tkinter front end (`client/knockc/gui.py`) over the same config/target/
+channel/preview parameters as the CLI, imported directly rather than
+shelled out to -- one derivation code path for the CLI, the GUI, and the
+tests. Config file and target fields keep a dropdown of their last 10
+distinct entries (`~/.config/knockc/gui_history.json`); channel is a
+fixed 0-10 dropdown; "Browse..." opens a file picker for `--config`.
+Preview renders the same `rich` output as `knockc.cli --preview` into
+the output pane. There's no GUI equivalent of `--inspect` -- it's an
+interactive curses byte-cursor widget, not something that maps onto a
+second GUI cleanly.
+
 ## Testing
 
 - **Unit / cross-language parity** (no root, no networking):

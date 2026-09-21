@@ -2,6 +2,14 @@
 
 ## 2026-09-20
 
+- Client: new Tkinter GUI (`client/knockc/gui.py`, run via
+  `python -m knockc.gui`) wrapping the CLI's config/target/channel/
+  preview parameters -- combobox recents for config and target
+  (persisted to `~/.config/knockc/gui_history.json`), a readonly
+  channel dropdown, a file-picker for the config path, and a preview
+  pane reusing `preview.render_preview`. Imports `knockc` modules
+  directly rather than shelling out to the CLI. New
+  `client/tests/test_gui_history.py` covers the recents-list logic.
 - Client: replaced the real Honeypot instance's public IP in
   `client/tests/test_sshconfig.py`'s test fixture with an RFC 5737
   documentation-reserved address (`203.0.113.10`), ahead of making the
