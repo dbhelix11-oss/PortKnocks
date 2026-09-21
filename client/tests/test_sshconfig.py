@@ -2,7 +2,7 @@ from knockc.sshconfig import resolve_target
 
 SAMPLE_CONFIG = """
 Host aws-honeypot
-     Hostname 3.23.201.67
+     Hostname 203.0.113.10
      User admin
      Port 1221
 
@@ -22,7 +22,7 @@ def write_config(tmp_path, contents=SAMPLE_CONFIG):
 
 def test_resolves_known_alias(tmp_path):
     cfg = write_config(tmp_path)
-    assert resolve_target("aws-honeypot", cfg) == ("3.23.201.67", True)
+    assert resolve_target("aws-honeypot", cfg) == ("203.0.113.10", True)
 
 
 def test_leaves_ip_or_unknown_hostname_unchanged(tmp_path):

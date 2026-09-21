@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-09-20
+
+- Client: replaced the real Honeypot instance's public IP in
+  `client/tests/test_sshconfig.py`'s test fixture with an RFC 5737
+  documentation-reserved address (`203.0.113.10`), ahead of making the
+  repo public.
+
 ## 2026-09-19
 
 - Client: `--target` now accepts an `~/.ssh/config` `Host` alias, not just
