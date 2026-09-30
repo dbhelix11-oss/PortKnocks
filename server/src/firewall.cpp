@@ -47,12 +47,6 @@ void Firewall::setup_port_group(const std::string &set_name, const std::vector<u
             // default_deny mode this explicit rule is unnecessary: the
             // chain's own `drop` policy already covers this port (and
             // every other port) once nothing above has matched.
-            //
-            // "add rule" without a handle is not idempotent, so this may
-            // run more than once across restarts and create duplicate
-            // (harmless, identical) rules; operators restarting knockd
-            // repeatedly should periodically flush and recreate the
-            // chain, documented in README.md.
             std::ostringstream deny_rule;
             deny_rule << "tcp dport " << port << " drop";
             run_nft({"add", "rule", config_.family, config_.table, config_.chain, deny_rule.str()});
@@ -61,6 +55,14 @@ void Firewall::setup_port_group(const std::string &set_name, const std::vector<u
 }
 
 void Firewall::ensure_base_ruleset() const {
+    // Start from a clean slate so restarts don't pile up duplicate rules
+    // ("add rule" is not idempotent) or keep a stale chain policy/hook.
+    // `add` first, then `delete`: deleting a table that doesn't exist is an
+    // error, but `add` on an existing one is a no-op, so this pair works
+    // whether or not a previous run left the table behind. Any open timed-set
+    // entries are dropped too, which is fine -- a restart re-arms the knock.
+    run_nft({"add", "table", config_.family, config_.table});
+    run_nft({"delete", "table", config_.family, config_.table});
     run_nft({"add", "table", config_.family, config_.table});
 
     std::ostringstream chain_spec;

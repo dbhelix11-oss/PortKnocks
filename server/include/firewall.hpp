@@ -75,7 +75,9 @@ class Firewall {
 public:
     explicit Firewall(FirewallConfig config);
 
-    // Idempotent: creates the table/set/chain/rule if missing. Call once at
+    // Idempotent: deletes any existing knockd table (left over from a
+    // previous run) and recreates the table/sets/chain/rules from scratch,
+    // so repeated restarts never accumulate duplicate rules. Call once at
     // startup. Requires CAP_NET_ADMIN (typically root).
     void ensure_base_ruleset() const;
 

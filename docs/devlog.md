@@ -444,3 +444,43 @@ and `session`. Not deployed to the real Honeypot instance as part of
 this change; its `knockd.conf` still has a single `target_port` and no
 `open_port` channels, so behavior there is unaffected until it's
 intentionally reconfigured.
+
+## 2026-09-29 — OpenWrt port, Phase A: knockd next to fw4
+
+Goal: run `knockd` on a Linksys MR8300 (OpenWrt 23.05.5) so a knock from
+the LAN opens router SSH (channel 0) or LuCI (channel 1), without
+touching fw4's configuration.
+
+**Why no fw4 changes are needed.** knockd's `inet knockd` table hooks
+`input` at priority -10, before fw4's (0). This is the same lesson as the
+2026-09-14 single-chain gotcha, used on purpose: a `drop` is final, an
+`accept` is not, so un-knocked hosts are dropped by knockd and knocked
+hosts fall through to fw4's own LAN accept. `fw4 reload` replaces only
+`inet fw4`, so knockd's table survives it.
+
+**A startup bug found on the way.** `ensure_base_ruleset()` used
+`add rule`, which is not idempotent, so every restart appended another
+identical `drop` rule (the old code comment even said so and pushed the
+cleanup onto the operator). That matters more on a router, where procd
+respawns the daemon. Startup now does `add table`, `delete table`,
+`add table`: the leading `add` makes the `delete` safe when no table
+exists. The cost is that open timed-set entries are lost on restart,
+which just means the host has to knock again.
+
+**Verification.** New `server/tests/e2e_netns_fw4_lan_test.sh` builds an
+fw4-style table (input policy drop, LAN accepts) and checks, in order:
+ports closed before a knock; channel 0 opens only the SSH-like port;
+channel 1 opens the LuCI-like port; a full replacement of the fw4 table
+leaves knockd's table and the open port intact; both close after
+`open_duration`; an unprotected port stays open throughout; and a knockd
+restart leaves exactly one drop rule. It passes, and so do
+`e2e_netns_test.sh` and `e2e_netns_default_deny_test.sh`.
+
+**Not done.** The ipk has not been built with the OpenWrt SDK and nothing
+has run on the router. Phase B (WAN listening plus DNAT forwards to LAN
+hosts) is planned. The README describes a dead-man-switch timer for the
+first on-device run, since a bad rule there means failsafe mode.
+
+`knockd.conf` was renamed `knockd.conf.example` because `.gitignore`
+ignores `*.conf` (only `*.conf.example` is allowed); the package
+`Makefile` still installs it as `/etc/knockd/knockd.conf`.

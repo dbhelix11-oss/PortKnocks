@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-09-29
+
+- Server: `Firewall::ensure_base_ruleset()` now deletes and recreates the
+  `knockd` nftables table at startup (`add` then `delete` then `add`, so
+  it works whether or not a previous run left the table behind). Restarts
+  no longer accumulate duplicate `drop` rules or keep a stale chain
+  policy/hook. Open timed-set entries are dropped on restart.
+- OpenWrt port, Phase A (`server/openwrt/`): package `Makefile`, procd
+  `knockd.init`, `knockd.conf.example` and a README for a Linksys MR8300
+  (OpenWrt 23.05.5, ipq40xx). A LAN-side knock on `br-lan` opens router
+  SSH (channel 0) or LuCI (channel 1) with no fw4 changes: knockd's table
+  hooks `input` at priority -10, ahead of fw4's 0. Not yet built with the
+  SDK or tried on real hardware.
+- New `server/tests/e2e_netns_fw4_lan_test.sh`: runs knockd next to an
+  fw4-style table and checks that it gates ports without modifying it,
+  survives a simulated `fw4 reload`, and doesn't duplicate rules on
+  restart. The existing e2e tests still pass.
+
 ## 2026-09-20
 
 - Client: new Tkinter GUI (`client/knockc/gui.py`, run via

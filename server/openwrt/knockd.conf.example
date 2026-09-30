@@ -1,0 +1,28 @@
+# knockd on OpenWrt (Linksys MR8300): LAN-side knock gating router SSH and
+# LuCI. Install as /etc/knockd/knockd.conf.
+[knock]
+keyfile = /etc/knockd/secret.key
+time_step = 30
+n_ports = 6
+port_low = 20000
+port_high = 60000
+inactivity_timeout = 5
+replay_ttl = 90
+
+[server]
+# The LAN bridge (lan1-4 + Wi-Fi APs). Ethernet-framed, which the sniffer
+# requires. libpcap sees knock SYNs before netfilter, so fw4 dropping them
+# doesn't matter.
+interface = br-lan
+# Channel 0: SSH (dropbear).
+target_port = 22
+open_duration = 30
+# Runs before fw4's input chain (priority 0): our `drop` for un-knocked
+# hosts is final, our `accept` for knocked hosts falls through to fw4's own
+# LAN accept. No fw4 config changes are needed.
+base_chain_priority = -10
+log_level = info
+
+# Channel 1: LuCI (uhttpd) over HTTP and HTTPS.
+[channel.1]
+open_port = 80, 443
