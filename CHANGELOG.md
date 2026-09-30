@@ -17,6 +17,14 @@
   fw4-style table and checks that it gates ports without modifying it,
   survives a simulated `fw4 reload`, and doesn't duplicate rules on
   restart. The existing e2e tests still pass.
+- `server/openwrt/README.md`: Step 0 now targets OpenWrt 25.12.x instead
+  of 23.05.5 (23.05 is end-of-life and affected by CVE-2025-62526 and
+  CVE-2026-53921; the fix is upgrading, not working around it) and points
+  to the router upgrade/CVE guides and downloaded firmware, which now live
+  outside this repo in the separate `OpenWRT_Secure` project folder rather
+  than under `docs/`. The install step moves from `opkg`/`.ipk` to
+  `apk`/`.apk`, matching 25.12's package manager change. No code changed;
+  the OpenWrt build itself is on hold until the router is upgraded.
 
 ## 2026-09-20
 
